@@ -8,10 +8,12 @@
 
 using namespace std;
 
-// int - степень, int - множитель
+// палиндром
 typedef bitset<32> Poly;
 
-const size_t buf_size = 100 * 1024 * 1024;
+//const size_t buf_size = 100 * 1024 * 1024;
+
+// неприводимые палиндромы g(x)
 map<int, vector<Poly>> gxes = {
 	{2, {0b111}},
 	{3, {0b1011}},
@@ -21,15 +23,16 @@ map<int, vector<Poly>> gxes = {
 	{7, {0b11100111, 0b10000011, 0b10011101}}
 };
 
-template<std::size_t N>
-void reverse(std::bitset<N>& b) {
-	for (std::size_t i = 0; i < N / 2; ++i) {
+// реверс битов в битсете
+template<size_t N> void reverse(bitset<N>& b) {
+	for (size_t i = 0; i < N / 2; ++i) {
 		bool t = b[i];
 		b[i] = b[N - i - 1];
 		b[N - i - 1] = t;
 	}
 }
 
+// Наибольший общий делитель
 int NOD(int n1, int n2)
 {
 	int div;
@@ -49,6 +52,7 @@ int NOK(int n1, int n2)
 	return n1 * n2 / NOD(n1, n2);
 }
 
+// простое ли число
 bool isPrime(int n)
 {
 	// Corner case 
@@ -63,6 +67,7 @@ bool isPrime(int n)
 	return true;
 }
 
+// палиндром с операторами сложения, деления, умножения, взятия остатка
 class MyPoly
 {
 public:
@@ -92,46 +97,7 @@ public:
 		return result;
 	}
 
-	/*
-	def divide(val1,val2):
-	a = toList(val1)
-	b = toList(val2)
-	working=toString(val1)+"\n"
-
-	res=""
-	addspace=""
-
-	while len(b) <= len(a) and a:
-			if a[0] == 1:
-				del a[0]
-				for j in range(len(b)-1):
-						a[j] ^= b[j+1]
-				if (len(a)>0):
-				working +=addspace+toString(b)+"\n"
-				working +=addspace+"-" * (len(b))+"\n"
-				addspace+=" "
-				working +=addspace+toString(a)+"\n"
-				res+= "1"
-
-		else:
-				del a[0]
-			working +=addspace+"0" * (len(b))+"\n"
-			working +=addspace+"-" * (len(b))+"\n"
-			addspace+=" "
-			working +=addspace+toString(a)+"\n"
-
-				res+="0"
-
-
-	print "Result is\t",res
-	print "Remainder is\t",toString(a)
-
-	print "Working is\t\n\n",res.rjust(len(val1)),"\n",
-	print "-" * (len(val1)),"\n",working
-
-	return toString(a)
-	*/
-
+	// не уверен, правильно или нет
 	MyPoly operator+(const MyPoly& other)
 	{
 		return other.p | p;
@@ -139,7 +105,7 @@ public:
 
 	MyPoly operator/(const MyPoly& divisor)
 	{
-		uint32_t a_size = get_msbit(), b_size = divisor.get_msbit();
+		uint32_t a_size = get_msbit() + 1, b_size = divisor.get_msbit() + 1;
 
 		vector<bool> a, b, result;
 		for (size_t i = 0; i < a_size; ++i)
@@ -183,7 +149,7 @@ public:
 
 	MyPoly operator%(const MyPoly& divisor)
 	{
-		uint32_t a_size = get_msbit(), b_size = divisor.get_msbit();
+		uint32_t a_size = get_msbit() + 1, b_size = divisor.get_msbit() + 1;
 
 		vector<bool> a, b, result;
 		for (size_t i = 0; i < a_size; ++i)
@@ -283,6 +249,8 @@ public:
 		return res;
 	}
 
+	// возвращает старший бит
+	// для 00110011 вернёт 5
 	uint32_t get_msbit() const
 	{
 		uint32_t idx = 0;
@@ -291,7 +259,7 @@ public:
 			if (p[i])
 				idx = i;
 		}
-		return idx + 1;
+		return idx;
 	}
 };
 
@@ -331,7 +299,7 @@ int main()
 	MyPoly gxf = gx * xc;
 
 	MyPoly msb_poly;
-	msb_poly.p[gxf.get_msbit() - 1] = 1;
+	msb_poly.p[gxf.get_msbit()] = 1;
 	
 	MyPoly cx;
 
