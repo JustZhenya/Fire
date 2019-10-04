@@ -63,7 +63,7 @@ class MyPoly
 public:
 	static void divide(const MyPoly& pa, const MyPoly& pb, Poly& presult, Poly& premainder)
 	{
-		uint32_t a_size = pa.get_msbit() + 1, b_size = pb.get_msbit() + 1;
+		size_t a_size = pa.get_msbit() + 1, b_size = pb.get_msbit() + 1;
 
 		vector<bool> a, b, result;
 		for (size_t i = 0; i < a_size; ++i)
@@ -141,11 +141,118 @@ public:
 		return result;
 	}
 
+	static vector<bool> my_xor(const vector<bool>& a, const vector<bool>& b)
+	{
+		vector<bool> res;
+
+		for (size_t i = 1; i < b.size(); i++)
+			res.push_back(a[i] != b[i]);
+
+		return res;
+	}
+
+	static string vec_to_str(const vector<bool>& a)
+	{
+		string res;
+
+		for (bool b : a)
+			res += b ? "1" : "0";
+
+		return res;
+	}
+	
 	MyPoly operator%(const MyPoly& divisor) const
 	{
-		Poly result, remainder;
-		divide(p, divisor, result, remainder);
-		return remainder;
+		vector<bool> my_divident;
+		for (size_t i = 0; i < get_msbit() + 1; i++)
+			my_divident.push_back(p[i]);
+
+		vector<bool> my_divisor;
+		for (size_t i = 0; i < divisor.get_msbit() + 1; i++)
+			my_divisor.push_back(divisor.p[i]);
+
+		reverse(my_divident.begin(), my_divident.end());
+		reverse(my_divisor.begin(), my_divisor.end());
+
+		size_t pick = my_divisor.size();
+
+		vector<bool> tmp;
+		for (size_t i = 0; i < min(pick, my_divident.size()); i++)
+			tmp.push_back(my_divident[i]);
+
+		while (pick < my_divident.size())
+		{
+			//cout << vec_to_str(tmp) << " " << pick << endl;
+			if (tmp[0])
+			{
+				tmp = my_xor(my_divisor, tmp);
+			}
+			else
+			{
+				vector<bool> t(pick, false);
+				tmp = my_xor(t, tmp);
+			}
+			tmp.push_back(my_divident[pick]);
+			pick++;
+			//cout << vec_to_str(tmp) << " " << pick << endl;
+		}
+
+		if (tmp[0])
+		{
+			tmp = my_xor(my_divisor, tmp);
+		}
+		else
+		{
+			vector<bool> t(pick, false);
+			tmp = my_xor(t, tmp);
+		}
+
+		reverse(tmp.begin(), tmp.end());
+
+		MyPoly premainder;
+		for (size_t i = 0; i < tmp.size(); ++i)
+			premainder.p[i] = tmp[i];
+
+		return premainder;
+		/*
+		def mod2div(divident, divisor):
+
+			# Number of bits to be XORed at a time.
+			pick = len(divisor)
+
+			# Slicing the divident to appropriate
+			# length for particular step
+			tmp = divident[0 : pick]
+
+			while pick < len(divident):
+
+				if tmp[0] == '1':
+
+					# replace the divident by the result
+					# of XOR and pull 1 bit down
+					tmp = xor(divisor, tmp) + divident[pick]
+
+				else:   # If leftmost bit is '0'
+					# If the leftmost bit of the dividend (or the
+					# part used in each step) is 0, the step cannot
+					# use the regular divisor; we need to use an
+					# all-0s divisor.
+					tmp = xor('0'*pick, tmp) + divident[pick]
+
+				# increment pick to move further
+				pick += 1
+
+			# For the last n bits, we have to carry it out
+			# normally as increased value of pick will cause
+			# Index Out of Bounds.
+			if tmp[0] == '1':
+				tmp = xor(divisor, tmp)
+			else:
+				tmp = xor('0'*pick, tmp)
+
+			checkword = tmp
+			return checkword
+		*/
 	}
 
 	/*MyPoly operator%(const MyPoly& divisor)
@@ -258,10 +365,10 @@ private:
 	MyPoly gx;
 	MyPoly xc;
 	MyPoly gxf;
-	//MyPoly msb_poly;
+	MyPoly msb_poly;
 
 public:
-	FireEncDec(int _P): P(_P), t(0), c(0), e(0), n(0), r(0), payload_len(0), gx(0), xc(0), gxf(0), gxf_msb(0)/*, msb_poly(0)*/
+	FireEncDec(int _P): P(_P), t(0), c(0), e(0), n(0), r(0), payload_len(0), gx(0), xc(0), gxf(0), gxf_msb(0), msb_poly(0)
 	{
 		// старшая степень t не меньше длины исправляемого пакета P
 		t = P;
@@ -289,8 +396,8 @@ public:
 		gxf = gx * xc;
 
 		// ...старшую степень образующего полинома G(X)Ф
-		size_t gxf_msb = gxf.get_msbit();
-		//msb_poly.p[gxf_msb] = 1;
+		gxf_msb = gxf.get_msbit();
+		msb_poly.p[gxf_msb] = 1;
 
 		cout << "P = " << P << endl;
 		cout << "t = " << t << endl;
@@ -302,7 +409,7 @@ public:
 		cout << "gx = " << gx.to_string() << endl;
 		cout << "xc = " << xc.to_string() << endl;
 		cout << "gxf = " << gxf.to_string() << endl;
-		//cout << "msb_poly = " << msb_poly.to_string() << endl;
+		cout << "msb_poly = " << msb_poly.to_string() << endl;
 	}
 
 	void encode(const string& filename)
@@ -323,11 +430,12 @@ public:
 				if (bits_read == payload_len)
 				{
 					// Производим увеличение степени информационного полинома I(X) на старшую степень образующего полинома G(X)Ф
-					//MyPoly qx = info * msb_poly;
-					MyPoly qx = info.p << gxf_msb;
+					MyPoly qx = info * msb_poly;
+					//MyPoly qx = info.p << gxf_msb;
 
 					// Кодовый полином C(X) получается путем добавления остатка от деления Q(X) на G(X)Ф к расширенному информационному полиному Q(X).
-					MyPoly cx = info.p & (qx % gxf).p;
+					MyPoly cx = (qx % gxf) + qx;
+					//MyPoly cx = qx.p & (qx % gxf).p;
 
 					for (int j = n - 1; j >= 0; j--)
 					{
@@ -377,6 +485,8 @@ public:
 					if (info_remainder1.p != 0 && info_remainder2.p != 0)
 					{
 						// надо исправить ошибку
+						cout << "Found error!" << endl;
+
 						MyPoly cx_orig = cx;
 						size_t shift_count = 0;
 						while (info_remainder1.p != info_remainder2.p && shift_count < n)
@@ -391,7 +501,10 @@ public:
 						cx = cx_orig + info_remainder1;
 					}
 
-					cx.p >>= r; // отбросить проверочный код
+					cx.p &= 0b111111000000; // отбросить проверочный код
+					cx = cx / msb_poly; // поделить на x^6 (на самом деле x^4)
+
+					//cx.p >>= r; // отбросить проверочный код
 					//cx = cx / msb_poly; // поделить на x^6 (на самом деле x^4)
 
 					for (int j = payload_len - 1; j >= 0; j--)
