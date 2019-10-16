@@ -8,9 +8,6 @@
 
 using namespace std;
 
-// палиндром
-typedef bitset<32> Poly;
-
 //const size_t buf_size = 100 * 1024 * 1024;
 
 // реверс битов в битсете
@@ -57,390 +54,286 @@ bool isPrime(int n)
 	return true;
 }
 
-// палиндром с операторами сложения, деления, умножения, взятия остатка
-class MyPoly
+class VecPoly
 {
-public:
-	static void divide(const MyPoly& pa, const MyPoly& pb, Poly& presult, Poly& premainder)
-	{
-		size_t a_size = pa.get_msbit() + 1, b_size = pb.get_msbit() + 1;
-
-		vector<bool> a, b, result;
-		for (size_t i = 0; i < a_size; ++i)
-			a.push_back(pa.p[i]);
-		for (size_t i = 0; i < b_size; ++i)
-			b.push_back(pb.p[i]);
-
-		reverse(a.begin(), a.end());
-		reverse(b.begin(), b.end());
-
-		size_t append_zeroes = b.size() - 1;
-		for (size_t i = 0; i < append_zeroes; ++i)
-			a.push_back(false);
-
-		while (b.size() <= a.size() && !a.empty())
-		{
-			if (a[0])
-			{
-				a.erase(a.begin());
-				for (size_t j = 0; j < b.size() - 1; ++j)
-					a[j] = (a[j] != b[j + 1]); // xor
-
-				if (!a.empty())
-					result.push_back(true);
-			}
-			else
-			{
-				a.erase(a.begin());
-				result.push_back(false);
-			}
-		}
-
-		reverse(result.begin(), result.end());
-		reverse(a.begin(), a.end());
-
-		presult = 0;
-		for (size_t i = append_zeroes; i < result.size(); ++i)
-			presult[i - append_zeroes] = result[i];
-
-		premainder = 0;
-		for (size_t i = 0; i < a.size(); ++i)
-			premainder[i] = a[i];
-	}
-
-	Poly p;
-
-	MyPoly() = default;
-
-	MyPoly(const Poly& _p): p(_p) { }
-
-	MyPoly operator*(const MyPoly& other) const
-	{
-		MyPoly result;
-		for (size_t i = 0; i < other.p.size(); ++i)
-		{
-			for (size_t j = 0; j < p.size(); ++j)
-			{
-				if(other.p[i] && p[j])
-					result.p[i + j] = 1;
-			}
-		}
-		return result;
-	}
-
-	// не уверен, правильно или нет
-	MyPoly operator+(const MyPoly& other) const
-	{
-		return other.p ^ p;
-	}
-
-	MyPoly operator/(const MyPoly& divisor) const
-	{
-		Poly result, remainder;
-		divide(p, divisor, result, remainder);
-		return result;
-	}
-
-	static vector<bool> my_xor(const vector<bool>& a, const vector<bool>& b)
+private:
+	static vector<bool> my_xor(const vector<bool>& a, const vector<bool>& b, size_t offset = 1)
 	{
 		vector<bool> res;
 
-		for (size_t i = 1; i < b.size(); i++)
-			res.push_back(a[i] != b[i]);
-
-		return res;
-	}
-
-	static string vec_to_str(const vector<bool>& a)
-	{
-		string res;
-
-		for (bool b : a)
-			res += b ? "1" : "0";
-
-		return res;
-	}
-	
-	MyPoly operator%(const MyPoly& divisor) const
-	{
-		vector<bool> my_divident;
-		for (size_t i = 0; i < get_msbit() + 1; i++)
-			my_divident.push_back(p[i]);
-
-		vector<bool> my_divisor;
-		for (size_t i = 0; i < divisor.get_msbit() + 1; i++)
-			my_divisor.push_back(divisor.p[i]);
-
-		reverse(my_divident.begin(), my_divident.end());
-		reverse(my_divisor.begin(), my_divisor.end());
-
-		size_t pick = my_divisor.size();
-
-		vector<bool> tmp;
-		for (size_t i = 0; i < min(pick, my_divident.size()); i++)
-			tmp.push_back(my_divident[i]);
-
-		while (pick < my_divident.size())
+		for (size_t i = offset; i < b.size(); i++) // TODO check range
 		{
-			//cout << vec_to_str(tmp) << " " << pick << endl;
-			if (tmp[0])
+			if (a[i] == b[i])
+				res.push_back(false);
+			else
+				res.push_back(true);
+		}
+
+		return res;
+	}
+
+public:
+
+	vector<bool> vec;
+
+	VecPoly(size_t len) : vec(len, false) { }
+	VecPoly(const vector<bool>& _vec) : vec(_vec) { }
+
+	operator bool() const
+	{
+		for (bool b : vec)
+			if (b)
+				return true;
+
+		return false;
+	}
+
+	VecPoly operator>>(int offset) const
+	{
+		vector<bool> res(vec.size(), 0);
+		if (vec.size() >= offset)
+		{
+			copy(vec.begin() + offset, vec.end(), res.begin());
+		}
+		return res;
+	}
+
+	VecPoly operator<<(int offset) const
+	{
+		vector<bool> res(vec.size(), 0);
+		if (vec.size() >= offset)
+		{
+			copy(vec.begin(), vec.end() - offset, res.begin() + offset);
+		}
+		return res;
+	}
+
+	VecPoly operator&(const VecPoly& other) const
+	{
+		vector<bool> res;
+
+		for (size_t i = 0; i < min(vec.size(), other.vec.size()); i++)
+			res.push_back(vec[i] && other.vec[i]);
+
+		return res;
+	}
+
+	VecPoly operator|(const VecPoly& other) const
+	{
+		vector<bool> res;
+
+		for (size_t i = 0; i < min(vec.size(), other.vec.size()); i++)
+			res.push_back(vec[i] || other.vec[i]);
+
+		return res;
+	}
+
+	VecPoly operator^(const VecPoly& other) const
+	{
+		vector<bool> res;
+
+		for (size_t i = 0; i < min(vec.size(), other.vec.size()); i++)
+			res.push_back(vec[i] != other.vec[i]);
+
+		return res;
+	}
+
+	VecPoly operator*(const VecPoly& other) const
+	{
+		vector<bool> res;
+
+		for (size_t i = 0; i < other.vec.size(); ++i)
+		{
+			for (size_t j = 0; j < vec.size(); ++j)
 			{
-				tmp = my_xor(my_divisor, tmp);
+				if (other.vec[i] && vec[j])
+				{
+					size_t offset = i + j;
+					if (res.size() < offset + 1)
+						res.resize(offset + 1, false);
+					res[offset] = true;
+				}
+			}
+		}
+
+		return res;
+	}
+
+	VecPoly operator%(const VecPoly& divisor) const
+	{
+		size_t pick = divisor.vec.size();
+
+		VecPoly tmp(pick);
+		copy(vec.begin(), vec.begin() + min(pick, vec.size()), tmp.vec.begin());
+
+		//cout << "begin: " << tmp.to_string() << endl;
+
+		for (; pick < vec.size(); pick++)
+		{
+			//cout << tmp.to_string() << " " << pick << endl;
+			if (tmp.vec[0])
+			{
+				tmp.vec = my_xor(divisor.vec, tmp.vec);
 			}
 			else
 			{
-				vector<bool> t(pick, false);
-				tmp = my_xor(t, tmp);
+				VecPoly t(pick);
+				tmp.vec = my_xor(t.vec, tmp.vec);
 			}
-			tmp.push_back(my_divident[pick]);
-			pick++;
-			//cout << vec_to_str(tmp) << " " << pick << endl;
+			tmp.vec.push_back(vec[pick]);
+			//cout << tmp.to_string() << " " << pick+1 << endl;
 		}
 
-		if (tmp[0])
+		if (tmp.vec[0])
 		{
-			tmp = my_xor(my_divisor, tmp);
+			tmp.vec = my_xor(divisor.vec, tmp.vec);
 		}
 		else
 		{
-			vector<bool> t(pick, false);
-			tmp = my_xor(t, tmp);
+			VecPoly t(pick);
+			tmp.vec = my_xor(t.vec, tmp.vec);
 		}
 
-		reverse(tmp.begin(), tmp.end());
-
-		MyPoly premainder;
-		for (size_t i = 0; i < tmp.size(); ++i)
-			premainder.p[i] = tmp[i];
-
-		return premainder;
-		/*
-		def mod2div(divident, divisor):
-
-			# Number of bits to be XORed at a time.
-			pick = len(divisor)
-
-			# Slicing the divident to appropriate
-			# length for particular step
-			tmp = divident[0 : pick]
-
-			while pick < len(divident):
-
-				if tmp[0] == '1':
-
-					# replace the divident by the result
-					# of XOR and pull 1 bit down
-					tmp = xor(divisor, tmp) + divident[pick]
-
-				else:   # If leftmost bit is '0'
-					# If the leftmost bit of the dividend (or the
-					# part used in each step) is 0, the step cannot
-					# use the regular divisor; we need to use an
-					# all-0s divisor.
-					tmp = xor('0'*pick, tmp) + divident[pick]
-
-				# increment pick to move further
-				pick += 1
-
-			# For the last n bits, we have to carry it out
-			# normally as increased value of pick will cause
-			# Index Out of Bounds.
-			if tmp[0] == '1':
-				tmp = xor(divisor, tmp)
-			else:
-				tmp = xor('0'*pick, tmp)
-
-			checkword = tmp
-			return checkword
-		*/
+		return tmp;
 	}
-
-	/*MyPoly operator%(const MyPoly& divisor)
-	{
-		size_t a_size = get_msbit(), b_size = divisor.get_msbit();
-
-		size_t result_idx = 0;
-		Poly a = p, b = divisor.p, result;
-
-		size_t append_zeroes = b_size - 1;
-		a <<= append_zeroes;
-		a_size += append_zeroes;
-
-		reverse(a);
-		reverse(b);
-
-		while (b_size <= a_size && a_size)
-		{
-			if (a[a_size - 1])
-			{
-				//a >>= 1;
-				--a_size;
-
-				for (size_t j = 0; j > b_size - 1; --j)
-					a[j] = (a[j] != b[j + 1]); // xor
-
-				if (a_size)
-					result[result_idx++] = true;
-			}
-			else
-			{
-				//a >>= 1;
-				--a_size;
-
-				if (a_size)
-					result[result_idx++] = false;
-			}
-		}
-
-		return result;
-	}*/
 
 	string to_string() const
 	{
 		string res;
 
-		size_t msb = get_msbit() + 1;
-		for (size_t i = 0; i < msb; ++i)
-		{
-			res = (p[i] ? "1" : "0") + res;
-		}
+		for (bool b : vec)
+			res += b ? "1" : "0";
 
 		return res;
 	}
 
-	// возвращает старший бит
-	// для 00110011 вернёт 5
-	size_t get_msbit() const
+	void crshift(int len)
 	{
-		size_t idx = 0;
-		for (size_t i = 0; i < p.size(); ++i)
-		{
-			if (p[i])
-				idx = i;
-		}
-		return idx;
+		*this = (*this >> len) | (*this << (int) (vec.size() - len));
 	}
 
-	void crshift(size_t len)
+	void clshift(int len)
 	{
-		bitset<12> tmp; // ПЕРЕГОВНОКОДИТЬ ЧТОБЫ БЫЛА КОНСТАНТА
-		for (size_t i = 0; i < 12; ++i)
-			tmp[i] = p[i];
-		tmp = (tmp >> len) | (tmp << (tmp.size() - len));
-
-		p = 0;
-		for (size_t i = 0; i < 12; ++i)
-			p[i] = tmp[i];
-	}
-
-	void clshift(size_t len)
-	{
-		bitset<12> tmp; // ПЕРЕГОВНОКОДИТЬ ЧТОБЫ БЫЛА КОНСТАНТА
-		for (size_t i = 0; i < 12; ++i)
-			tmp[i] = p[i];
-		tmp = (tmp << len) | (tmp >> (tmp.size() - len));
-
-		p = 0;
-		for (size_t i = 0; i < 12; ++i)
-			p[i] = tmp[i];
+		*this = (*this << len) | (*this >> (int) (vec.size() - len));
 	}
 };
 
 class FireEncDec
 {
 private:
-
 	// неприводимые полиномы g(x)
-	static const map<int, vector<Poly>> gxes;
-
-	int P; // длина исправляемого пакета
-	int t; // старшая степень полинома gx
-	int c; // Старшая степень второго полинома
-	int e; // При этом с не должно делиться нацело на число е, где е = 2^t - 1
-	int n; // При этом блоковая длина кода Файра будет являться произведением чисел e и с: n = е*с
-	int r; // а длина проверочной группы r в кодовой комбинации будет являться суммой старших степеней обоих образующих полиномов: r = t+c
+	static const map<int, vector<vector<bool>>> gxes;
+	
+	int n; // блоковая длина кода Файра
+	int r; // длина проверочной группы в кодовой комбинации
 	int payload_len; // длина полезной информации
-	size_t gxf_msb;
+	size_t gxf_msb; // старшая степень полинома g(x)f
 
-	MyPoly gx;
-	MyPoly xc;
-	MyPoly gxf;
-	MyPoly msb_poly;
+	// полиномы для декодирования
+	VecPoly gx;
+	VecPoly xc;
+
+	// полином для кодирования
+	VecPoly gxf;
+
+	bool get_byte_or_padding(ifstream& file, uint8_t& data, size_t& bytes_read)
+	{
+		uint8_t byte = 0;
+
+		if (file.get((char&)data))
+		{
+			// byte read
+			bytes_read++;
+			return true;
+		}
+
+		if ((bytes_read * 8) % payload_len != 0)
+		{
+			// padding read
+			bytes_read++;
+			return true;
+		}
+		else
+		{
+			// done reading
+			return false;
+		}
+	}
+
+	static long filesize(const string& filename)
+	{
+		struct stat stat_buf;
+		int rc = stat(filename.c_str(), &stat_buf);
+		return rc == 0 ? stat_buf.st_size : -1;
+	}
 
 public:
-	FireEncDec(int _P): P(_P), t(0), c(0), e(0), n(0), r(0), payload_len(0), gx(0), xc(0), gxf(0), gxf_msb(0), msb_poly(0)
+	// P - длина исправляемого пакета
+	FireEncDec(int P): n(), r(), payload_len(), gxf_msb(), gx(0), xc(0), gxf(0)
 	{
-		// старшая степень t не меньше длины исправляемого пакета P
-		t = P;
-		gx = gxes.at(t)[0];
-
-		// Старшая степень с второго полинома должна равняться или превышать удвоенную длину предполагаемого пакета ошибок Р:
-		c = 2 * P;
-		// При этом с не должно делиться нацело на число е, где е = 2^t - 1
-		e = pow(2, t) - 1;
+		int t = P; // старшая степень t не меньше длины исправляемого пакета P
+		int c = 2 * P; // Старшая степень с второго полинома должна равняться или превышать удвоенную длину предполагаемого пакета ошибок Р
+		int e = pow(2, t) - 1; // При этом с не должно делиться нацело на число е, где е = 2^t - 1
 		while (c % e == 0)
 			c++;
 
-		xc.p[0] = 1;
-		xc.p[c] = 1;
+		gx = gxes.at(t)[0];
 
-		// При этом блоковая длина кода Файра будет являться произведением чисел e и с: n = е*с
-		n = e * c; // длина кода Файра
+		xc.vec.resize(c + 1, false);
+		xc.vec[0] = 1;
+		xc.vec[c] = 1;
+		
+		gxf = gx * xc; // образующий полином кода Файра G(X)Ф определяется произведением двух примитивных полиномов: G(X)Ф = G(X)(Xс+1)
+		gxf_msb = gxf.vec.size() - 1; // старшая степень полинома g(x)f
 
-		// а длина проверочной группы r в кодовой комбинации будет являться суммой старших степеней обоих образующих полиномов: r = t+c
-		r = t + c; // длина избыточной информации
-
+		n = e * c; // блоковая длина кода Файра будет являться произведением чисел e и с: n = е*с
+		r = t + c; // длина проверочной группы r в кодовой комбинации будет являться суммой старших степеней обоих образующих полиномов: r = t+c
 		payload_len = n - r; // длина полезной информации
-
-		// образующий полином кода Файра G(X)Ф определяется произведением двух примитивных полиномов: G(X)Ф = G(X)(Xс+1)
-		gxf = gx * xc;
-
-		// ...старшую степень образующего полинома G(X)Ф
-		gxf_msb = gxf.get_msbit();
-		msb_poly.p[gxf_msb] = 1;
 
 		cout << "P = " << P << endl;
 		cout << "t = " << t << endl;
 		cout << "c = " << c << endl;
 		cout << "e = " << e << endl;
-		cout << "n = " << n << endl;
-		cout << "r = " << r << endl;
-		cout << "n-r = " << payload_len << endl;
 		cout << "gx = " << gx.to_string() << endl;
 		cout << "xc = " << xc.to_string() << endl;
 		cout << "gxf = " << gxf.to_string() << endl;
-		cout << "msb_poly = " << msb_poly.to_string() << endl;
+		cout << "gxf_msb = " << gxf_msb << endl;
+		cout << "n = " << n << endl;
+		cout << "r = " << r << endl;
+		cout << "n-r = " << payload_len << endl;
 	}
 
-	void encode(const string& filename)
+	void encode(const string& filename, const string& out_filename)
 	{
-		MyPoly info;
+		VecPoly info(0);
 
 		ifstream file(filename, ios::binary);
-		ofstream output_file(filename + ".enc", ios::binary);
-		char in_byte = 0, out_byte = 0;
-		int bits_read = 0, bits_wrote = 0;
-		while (file.get(in_byte))
+		ofstream output_file(out_filename, ios::binary);
+		uint8_t in_byte = 0, out_byte = 0;
+		int bits_wrote = 0;
+
+		size_t bytes_read = 0;
+		uint64_t total_bytes = filesize(filename);
+		output_file.write((char*) &total_bytes, sizeof(total_bytes)); // fixme endianess
+
+		while (get_byte_or_padding(file, in_byte, bytes_read))
 		{
 			for (int i = 7; i >= 0; i--)
 			{
 				bool bit = (in_byte >> i) & 1;
-				info.p |= bit;
-				bits_read++;
-				if (bits_read == payload_len)
+				info.vec.push_back(bit);
+				if (info.vec.size() == payload_len)
 				{
-					// Производим увеличение степени информационного полинома I(X) на старшую степень образующего полинома G(X)Ф
-					MyPoly qx = info * msb_poly;
-					//MyPoly qx = info.p << gxf_msb;
+					info.vec.resize(info.vec.size() + gxf_msb, 0); // Производим увеличение степени информационного полинома I(X) на старшую степень образующего полинома G(X)Ф
+					VecPoly remainder = info % gxf; // Выполняем деление расширенного информационного полинома Q(X) на образующий полином G(X)Ф
+					info.vec.erase(info.vec.begin() + payload_len, info.vec.end());
+					info.vec.insert(info.vec.end(), remainder.vec.begin(), remainder.vec.end());
 
-					// Кодовый полином C(X) получается путем добавления остатка от деления Q(X) на G(X)Ф к расширенному информационному полиному Q(X).
-					MyPoly cx = (qx % gxf) + qx;
-					//MyPoly cx = qx.p & (qx % gxf).p;
-
-					for (int j = n - 1; j >= 0; j--)
+					reverse(info.vec.begin(), info.vec.end());
+					for (bool b: info.vec)
 					{
 						// write bit
-						out_byte |= cx.p[j];
+						out_byte |= (b ? 1 : 0);
 						bits_wrote++;
 
 						if (bits_wrote == 8)
@@ -453,68 +346,76 @@ public:
 						out_byte <<= 1;
 					}
 
-					bits_read = 0;
-					info.p = 0;
+					info.vec.clear();
 				}
-				info.p <<= 1;
 			}
 		}
 	}
 
-	void decode(const string& filename)
+	void decode(const string& filename, const string& out_filename)
 	{
-		MyPoly cx;
+		VecPoly cx(0);
 
 		ifstream file(filename, ios::binary);
-		ofstream output_file(filename + ".dec", ios::binary);
-		char in_byte = 0, out_byte = 0;
-		int bits_read = 0, bits_wrote = 0;
-		while (file.get(in_byte))
+		ofstream output_file(out_filename, ios::binary);
+		uint8_t in_byte = 0, out_byte = 0;
+		int bits_wrote = 0;
+
+		size_t written_bytes = 0;
+		size_t total_bytes = 0;
+		file.read((char*) &total_bytes, sizeof(total_bytes));
+
+		while (file.get((char&) in_byte))
 		{
 			for (int i = 7; i >= 0; i--)
 			{
 				bool bit = (in_byte >> i) & 1;
-				cx.p |= bit;
-				bits_read++;
-				if (bits_read == n)
+				cx.vec.push_back(bit);
+				if (cx.vec.size() == n)
 				{
 					// Декодирование осуществляется путем деления кодового полинома С(Х) последовательно на обе компоненты образующего полинома кода Файра G(X)Ф: на (Х2+Х+1) и на (Х6+1).
-					MyPoly info_remainder1 = cx % gx;
-					MyPoly info_remainder2 = cx % xc;
+					reverse(cx.vec.begin(), cx.vec.end());
+					VecPoly info_remainder1 = cx % gx;
+					VecPoly info_remainder2 = cx % xc;
 
-					if (info_remainder1.p != 0 && info_remainder2.p != 0)
+					if (info_remainder1 && info_remainder2)
 					{
-						// надо исправить ошибку
+						// обнаружена ошибка
 						cout << "Found error!" << endl;
 
-						MyPoly cx_orig = cx;
+						VecPoly cx_orig = cx;
 						size_t shift_count = 0;
-						while (info_remainder1.p != info_remainder2.p && shift_count < n)
+						while (info_remainder1.vec != info_remainder2.vec && shift_count < n) // FIXME
 						{
-							cx.clshift(1);
+							cx.crshift(1);
 							info_remainder1 = cx % gx;
 							info_remainder2 = cx % xc;
 							shift_count++;
-						}
 
-						info_remainder1.crshift(shift_count);
-						cx = cx_orig + info_remainder1;
+							// удалить нули в начале вектора
+							while (!info_remainder1.vec.empty() && !info_remainder1.vec[0])
+								info_remainder1.vec.erase(info_remainder1.vec.begin());
+
+							while (!info_remainder2.vec.empty() && !info_remainder2.vec[0])
+								info_remainder2.vec.erase(info_remainder2.vec.begin());
+						}
+						
+						info_remainder1.vec.insert(info_remainder1.vec.begin(), cx_orig.vec.size() - info_remainder1.vec.size(), 0);
+						info_remainder1.clshift(shift_count);
+						cx = cx_orig ^ info_remainder1;
 					}
 
-					cx.p &= 0b111111000000; // отбросить проверочный код
-					cx = cx / msb_poly; // поделить на x^6 (на самом деле x^4)
+					cx.vec.erase(cx.vec.end() - r, cx.vec.end()); // отбросить проверочный код и поделить на x^6 (на самом деле x^4)
 
-					//cx.p >>= r; // отбросить проверочный код
-					//cx = cx / msb_poly; // поделить на x^6 (на самом деле x^4)
-
-					for (int j = payload_len - 1; j >= 0; j--)
+					for (bool b : cx.vec)
 					{
-						out_byte |= cx.p[j];
+						out_byte |= b ? 1 : 0;
 						bits_wrote++;
 
-						if (bits_wrote == 8)
+						if (bits_wrote == 8 && written_bytes < total_bytes)
 						{
 							output_file.put(out_byte);
+							written_bytes++;
 							out_byte = 0;
 							bits_wrote = 0;
 						}
@@ -522,22 +423,20 @@ public:
 						out_byte <<= 1;
 					}
 
-					bits_read = 0;
-					cx.p = 0;
+					cx.vec.clear();
 				}
-				cx.p <<= 1;
 			}
 		}
 	}
 };
 
-const map<int, vector<Poly>> FireEncDec::gxes = {
-	{2, {0b111}},
-	{3, {0b1011}},
-	{4, {0b10011, 0b11111}},
-	{5, {0b100101}},
-	{6, {0b1000011, 0b1001001, 0b1101111}},
-	{7, {0b11100111, 0b10000011, 0b10011101}}
+const map<int, vector<vector<bool>>> FireEncDec::gxes = {
+	{2, {{1, 1, 1}}},
+	{3, {{1, 0, 1, 1}}},
+	{4, {{1, 0, 0, 1, 1}, {1, 1, 1, 1, 1}}},
+	{5, {{1, 0, 0, 1, 0, 1}}},
+	{6, {{1, 0, 0, 0, 0, 1, 1}, {1, 0, 0, 1, 0, 0, 1}, {1, 1, 0, 1, 1, 1, 1}}},
+	{7, {{1, 1, 1, 0, 0, 1, 1, 1}, {1, 0, 0, 0, 0, 0, 1, 1}, {1, 0, 0, 1, 1, 1, 0, 1}}}
 };
 
 int main()
@@ -566,7 +465,7 @@ int main()
 	if (mode == 'a' || mode == 'e')
 	{
 		cout << "Encoding..." << flush;
-		fire.encode(filename);
+		fire.encode(filename, filename + ".enc");
 		filename += ".enc";
 		cout << " done!" << endl;
 	}
@@ -574,7 +473,7 @@ int main()
 	if (mode == 'a' || mode == 'd')
 	{
 		cout << "Decoding..." << flush;
-		fire.decode(filename);
+		fire.decode(filename, filename + ".dec");
 		cout << " done!" << endl;
 	}
 
