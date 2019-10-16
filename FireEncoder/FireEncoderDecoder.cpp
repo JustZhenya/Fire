@@ -329,7 +329,6 @@ public:
 					info.vec.erase(info.vec.begin() + payload_len, info.vec.end());
 					info.vec.insert(info.vec.end(), remainder.vec.begin(), remainder.vec.end());
 
-					reverse(info.vec.begin(), info.vec.end());
 					for (bool b: info.vec)
 					{
 						// write bit
@@ -363,7 +362,7 @@ public:
 
 		size_t written_bytes = 0;
 		size_t total_bytes = 0;
-		file.read((char*) &total_bytes, sizeof(total_bytes));
+		file.read((char*) &total_bytes, sizeof(total_bytes)); // fixme endianess
 
 		while (file.get((char&) in_byte))
 		{
@@ -374,7 +373,6 @@ public:
 				if (cx.vec.size() == n)
 				{
 					// Декодирование осуществляется путем деления кодового полинома С(Х) последовательно на обе компоненты образующего полинома кода Файра G(X)Ф: на (Х2+Х+1) и на (Х6+1).
-					reverse(cx.vec.begin(), cx.vec.end());
 					VecPoly info_remainder1 = cx % gx;
 					VecPoly info_remainder2 = cx % xc;
 
@@ -385,7 +383,7 @@ public:
 
 						VecPoly cx_orig = cx;
 						size_t shift_count = 0;
-						while (info_remainder1.vec != info_remainder2.vec && shift_count < n) // FIXME
+						while (info_remainder1.vec != info_remainder2.vec && shift_count < n)
 						{
 							cx.crshift(1);
 							info_remainder1 = cx % gx;
