@@ -4,20 +4,8 @@
 #include <vector>
 #include <algorithm>
 #include <map>
-#include <bitset>
 
 using namespace std;
-
-//const size_t buf_size = 100 * 1024 * 1024;
-
-// реверс битов в битсете
-template<size_t N> void reverse(bitset<N>& b) {
-	for (size_t i = 0; i < N / 2; ++i) {
-		bool t = b[i];
-		b[i] = b[N - i - 1];
-		b[N - i - 1] = t;
-	}
-}
 
 // Наибольший общий делитель
 int NOD(int n1, int n2)
@@ -33,25 +21,11 @@ int NOD(int n1, int n2)
 		div = NOD(n2, d);
 	return div;
 }
+
 // Наименьшее общее кратное
 int NOK(int n1, int n2)
 {
 	return n1 * n2 / NOD(n1, n2);
-}
-
-// простое ли число
-bool isPrime(int n)
-{
-	// Corner case 
-	if (n <= 1)
-		return false;
-
-	// Check from 2 to n-1 
-	for (int i = 2; i < n; i++)
-		if (n % i == 0)
-			return false;
-
-	return true;
 }
 
 class VecPoly
@@ -61,13 +35,8 @@ private:
 	{
 		vector<bool> res;
 
-		for (size_t i = offset; i < b.size(); i++) // TODO check range
-		{
-			if (a[i] == b[i])
-				res.push_back(false);
-			else
-				res.push_back(true);
-		}
+		for (size_t i = offset; i < min(a.size(), b.size()); i++)
+			res.push_back(a[i] != b[i]);
 
 		return res;
 	}
@@ -130,12 +99,7 @@ public:
 
 	VecPoly operator^(const VecPoly& other) const
 	{
-		vector<bool> res;
-
-		for (size_t i = 0; i < min(vec.size(), other.vec.size()); i++)
-			res.push_back(vec[i] != other.vec[i]);
-
-		return res;
+		return my_xor(vec, other.vec, 0);
 	}
 
 	VecPoly operator*(const VecPoly& other) const
@@ -209,12 +173,12 @@ public:
 
 	void crshift(int len)
 	{
-		*this = (*this >> len) | (*this << (int) (vec.size() - len));
+		*this = (*this >> len) | (*this << (int)(vec.size() - len));
 	}
 
 	void clshift(int len)
 	{
-		*this = (*this << len) | (*this >> (int) (vec.size() - len));
+		*this = (*this << len) | (*this >> (int)(vec.size() - len));
 	}
 };
 
@@ -223,7 +187,7 @@ class FireEncDec
 private:
 	// неприводимые полиномы g(x)
 	static const map<int, vector<vector<bool>>> gxes;
-	
+
 	int n; // блоковая длина кода Файра
 	int r; // длина проверочной группы в кодовой комбинации
 	int payload_len; // длина полезной информации
@@ -236,27 +200,22 @@ private:
 	// полином для кодирования
 	VecPoly gxf;
 
-	bool get_byte_or_padding(ifstream& file, uint8_t& data, size_t& bytes_read)
+	static void get_padded_bit_chunk(ifstream& file, vector<bool>& data, size_t byte_offset, size_t byte_chunk_size)
 	{
-		uint8_t byte = 0;
+		data.clear();
+		data.reserve(byte_chunk_size * 8);
+		file.clear();
+		file.seekg(byte_offset);
+		for (size_t i = 0; i < byte_chunk_size; i++)
+		{
+			uint8_t byte_data = 0;
+			file.get((char&) byte_data);
 
-		if (file.get((char&)data))
-		{
-			// byte read
-			bytes_read++;
-			return true;
-		}
-
-		if ((bytes_read * 8) % payload_len != 0)
-		{
-			// padding read
-			bytes_read++;
-			return true;
-		}
-		else
-		{
-			// done reading
-			return false;
+			for (int j = 7; j >= 0; j--)
+			{
+				bool bit = (byte_data >> j) & 1;
+				data.push_back(bit);
+			}
 		}
 	}
 
@@ -267,9 +226,53 @@ private:
 		return rc == 0 ? stat_buf.st_size : -1;
 	}
 
+	void encode_block(VecPoly& info) const
+	{
+		info.vec.resize(info.vec.size() + gxf_msb, 0); // Производим увеличение степени информационного полинома I(X) на старшую степень образующего полинома G(X)Ф
+		VecPoly remainder = info % gxf; // Выполняем деление расширенного информационного полинома Q(X) на образующий полином G(X)Ф
+		info.vec.erase(info.vec.begin() + payload_len, info.vec.end());
+		info.vec.insert(info.vec.end(), remainder.vec.begin(), remainder.vec.end());
+	}
+
+	void decode_block(VecPoly& cx) const
+	{
+		// Декодирование осуществляется путем деления кодового полинома С(Х) последовательно на обе компоненты образующего полинома кода Файра G(X)Ф: на (Х2+Х+1) и на (Х6+1).
+		VecPoly info_remainder1 = cx % gx;
+		VecPoly info_remainder2 = cx % xc;
+
+		if (info_remainder1 && info_remainder2)
+		{
+			// обнаружена ошибка
+			cout << "Found error!" << endl;
+
+			VecPoly cx_orig = cx;
+			size_t shift_count = 0;
+			while (info_remainder1.vec != info_remainder2.vec && shift_count < n)
+			{
+				cx.crshift(1);
+				info_remainder1 = cx % gx;
+				info_remainder2 = cx % xc;
+				shift_count++;
+
+				// удалить нули в начале вектора
+				while (!info_remainder1.vec.empty() && !info_remainder1.vec[0])
+					info_remainder1.vec.erase(info_remainder1.vec.begin());
+
+				while (!info_remainder2.vec.empty() && !info_remainder2.vec[0])
+					info_remainder2.vec.erase(info_remainder2.vec.begin());
+			}
+
+			info_remainder1.vec.insert(info_remainder1.vec.begin(), cx_orig.vec.size() - info_remainder1.vec.size(), 0);
+			info_remainder1.clshift(shift_count);
+			cx = cx_orig ^ info_remainder1;
+		}
+
+		cx.vec.erase(cx.vec.end() - r, cx.vec.end()); // отбросить проверочный код и поделить на x^6 (на самом деле x^4)
+	}
+
 public:
 	// P - длина исправляемого пакета
-	FireEncDec(int P): n(), r(), payload_len(), gxf_msb(), gx(0), xc(0), gxf(0)
+	FireEncDec(int P) : n(), r(), payload_len(), gxf_msb(), gx(0), xc(0), gxf(0)
 	{
 		int t = P; // старшая степень t не меньше длины исправляемого пакета P
 		int c = 2 * P; // Старшая степень с второго полинома должна равняться или превышать удвоенную длину предполагаемого пакета ошибок Р
@@ -282,7 +285,7 @@ public:
 		xc.vec.resize(c + 1, false);
 		xc.vec[0] = 1;
 		xc.vec[c] = 1;
-		
+
 		gxf = gx * xc; // образующий полином кода Файра G(X)Ф определяется произведением двух примитивных полиномов: G(X)Ф = G(X)(Xс+1)
 		gxf_msb = gxf.vec.size() - 1; // старшая степень полинома g(x)f
 
@@ -305,34 +308,53 @@ public:
 
 	void encode(const string& filename, const string& out_filename)
 	{
-		VecPoly info(0);
-
 		ifstream file(filename, ios::binary);
+		size_t total_bytes = filesize(filename);
+
 		ofstream output_file(out_filename, ios::binary);
-		uint8_t in_byte = 0, out_byte = 0;
-		int bits_wrote = 0;
+		output_file.write((char*)&total_bytes, sizeof(total_bytes)); // fixme endianess
 
-		size_t bytes_read = 0;
-		uint64_t total_bytes = filesize(filename);
-		output_file.write((char*) &total_bytes, sizeof(total_bytes)); // fixme endianess
+		size_t in_block_size = payload_len; // in bits
+		size_t out_block_size = n; // in bits
+		size_t in_chunk_size = NOK(16, NOK(in_block_size, out_block_size)); // in bits
+		size_t blocks_per_chunk = in_chunk_size / in_block_size;
+		size_t out_chunk_size = out_block_size * blocks_per_chunk; // in bits
+		size_t in_total_chunks = ceil(total_bytes * 8.0 / in_chunk_size);
 
-		while (get_byte_or_padding(file, in_byte, bytes_read))
+#ifndef _DEBUG
+#pragma omp parallel for
+#endif
+		for (int64_t chunk_num = 0; chunk_num < in_total_chunks; chunk_num++)
 		{
-			for (int i = 7; i >= 0; i--)
-			{
-				bool bit = (in_byte >> i) & 1;
-				info.vec.push_back(bit);
-				if (info.vec.size() == payload_len)
-				{
-					info.vec.resize(info.vec.size() + gxf_msb, 0); // Производим увеличение степени информационного полинома I(X) на старшую степень образующего полинома G(X)Ф
-					VecPoly remainder = info % gxf; // Выполняем деление расширенного информационного полинома Q(X) на образующий полином G(X)Ф
-					info.vec.erase(info.vec.begin() + payload_len, info.vec.end());
-					info.vec.insert(info.vec.end(), remainder.vec.begin(), remainder.vec.end());
+			vector<bool> in_chunk;
 
-					for (bool b: info.vec)
+#pragma omp critical(EncReadFromFile)
+			{
+				get_padded_bit_chunk(file, in_chunk, chunk_num * (in_chunk_size / 8), in_chunk_size / 8);
+			}
+
+			vector<vector<bool>> out_blocks;
+			size_t blocks = in_chunk.size() / in_block_size;
+			for (size_t i = 0; i < blocks; i++)
+			{
+				VecPoly info(in_block_size);
+				size_t in_bit_offset = i * in_block_size;
+				copy(in_chunk.begin() + in_bit_offset, in_chunk.begin() + in_bit_offset + in_block_size, info.vec.begin());
+				encode_block(info);
+				out_blocks.push_back(move(info.vec));
+			}
+
+#pragma omp critical(EncWriteToFile)
+			{
+				size_t out_byte_offset = chunk_num * (out_chunk_size / 8) + sizeof(total_bytes);
+				output_file.seekp(out_byte_offset);
+				int bits_wrote = 0;
+				uint8_t out_byte = 0;
+				for (const vector<bool>& out_block : out_blocks)
+				{
+					for (bool b : out_block)
 					{
-						// write bit
-						out_byte |= (b ? 1 : 0);
+						out_byte |= b ? 1 : 0;
 						bits_wrote++;
 
 						if (bits_wrote == 8)
@@ -344,8 +366,6 @@ public:
 
 						out_byte <<= 1;
 					}
-
-					info.vec.clear();
 				}
 			}
 		}
@@ -353,75 +373,67 @@ public:
 
 	void decode(const string& filename, const string& out_filename)
 	{
-		VecPoly cx(0);
-
 		ifstream file(filename, ios::binary);
+		size_t out_total_bytes, total_bytes = filesize(filename) - sizeof(out_total_bytes);
+		file.read((char*)&out_total_bytes, sizeof(out_total_bytes)); // fixme endianess
+
 		ofstream output_file(out_filename, ios::binary);
-		uint8_t in_byte = 0, out_byte = 0;
-		int bits_wrote = 0;
 
-		size_t written_bytes = 0;
-		size_t total_bytes = 0;
-		file.read((char*) &total_bytes, sizeof(total_bytes)); // fixme endianess
+		size_t in_block_size = n; // in bits
+		size_t out_block_size = payload_len; // in bits
+		size_t in_chunk_size = NOK(16, NOK(in_block_size, out_block_size)); // in bits
+		size_t blocks_per_chunk = in_chunk_size / in_block_size;
+		size_t out_chunk_size = out_block_size * blocks_per_chunk; // in bits
+		size_t in_total_chunks = ceil(total_bytes * 8.0 / in_chunk_size);
 
-		while (file.get((char&) in_byte))
+#ifndef _DEBUG
+#pragma omp parallel for
+#endif
+		for (int64_t chunk_num = 0; chunk_num < in_total_chunks; chunk_num++)
 		{
-			for (int i = 7; i >= 0; i--)
+			vector<bool> in_chunk;
+
+#pragma omp critical(DecReadFromFile)
 			{
-				bool bit = (in_byte >> i) & 1;
-				cx.vec.push_back(bit);
-				if (cx.vec.size() == n)
+				size_t in_byte_offset = chunk_num * (in_chunk_size / 8) + sizeof(out_total_bytes);
+				get_padded_bit_chunk(file, in_chunk, in_byte_offset, in_chunk_size / 8);
+			}
+
+			vector<vector<bool>> out_blocks;
+			size_t blocks = in_chunk.size() / in_block_size;
+			for (size_t i = 0; i < blocks; i++)
+			{
+				VecPoly info(in_block_size);
+				size_t in_bit_offset = i * in_block_size;
+				copy(in_chunk.begin() + in_bit_offset, in_chunk.begin() + in_bit_offset + in_block_size, info.vec.begin());
+				decode_block(info);
+				out_blocks.push_back(move(info.vec));
+			}
+
+#pragma omp critical(DecWriteToFile)
+			{
+				size_t out_byte_offset = chunk_num * (out_chunk_size / 8);
+				output_file.seekp(out_byte_offset);
+				int bits_wrote = 0;
+				uint8_t out_byte = 0;
+				for (const vector<bool>& out_block : out_blocks)
 				{
-					// Декодирование осуществляется путем деления кодового полинома С(Х) последовательно на обе компоненты образующего полинома кода Файра G(X)Ф: на (Х2+Х+1) и на (Х6+1).
-					VecPoly info_remainder1 = cx % gx;
-					VecPoly info_remainder2 = cx % xc;
-
-					if (info_remainder1 && info_remainder2)
-					{
-						// обнаружена ошибка
-						cout << "Found error!" << endl;
-
-						VecPoly cx_orig = cx;
-						size_t shift_count = 0;
-						while (info_remainder1.vec != info_remainder2.vec && shift_count < n)
-						{
-							cx.crshift(1);
-							info_remainder1 = cx % gx;
-							info_remainder2 = cx % xc;
-							shift_count++;
-
-							// удалить нули в начале вектора
-							while (!info_remainder1.vec.empty() && !info_remainder1.vec[0])
-								info_remainder1.vec.erase(info_remainder1.vec.begin());
-
-							while (!info_remainder2.vec.empty() && !info_remainder2.vec[0])
-								info_remainder2.vec.erase(info_remainder2.vec.begin());
-						}
-						
-						info_remainder1.vec.insert(info_remainder1.vec.begin(), cx_orig.vec.size() - info_remainder1.vec.size(), 0);
-						info_remainder1.clshift(shift_count);
-						cx = cx_orig ^ info_remainder1;
-					}
-
-					cx.vec.erase(cx.vec.end() - r, cx.vec.end()); // отбросить проверочный код и поделить на x^6 (на самом деле x^4)
-
-					for (bool b : cx.vec)
+					for (bool b : out_block)
 					{
 						out_byte |= b ? 1 : 0;
 						bits_wrote++;
 
-						if (bits_wrote == 8 && written_bytes < total_bytes)
+						if (bits_wrote == 8)
 						{
-							output_file.put(out_byte);
-							written_bytes++;
+							if(out_byte_offset < out_total_bytes)
+								output_file.put(out_byte);
 							out_byte = 0;
 							bits_wrote = 0;
+							out_byte_offset++;
 						}
 
 						out_byte <<= 1;
 					}
-
-					cx.vec.clear();
 				}
 			}
 		}
@@ -448,9 +460,9 @@ int main()
 	cout << "Expected error rate: " << flush;
 	cin >> P;
 
-	if (P < 1 || P > 8)
+	if (P < 2 || P > 7)
 	{
-		cout << "EER can be from 1 to 8" << endl;
+		cout << "EER can be from 2 to 7" << endl;
 		return 1;
 	}
 
@@ -467,7 +479,7 @@ int main()
 		filename += ".enc";
 		cout << " done!" << endl;
 	}
-	
+
 	if (mode == 'a' || mode == 'd')
 	{
 		cout << "Decoding..." << flush;
@@ -476,6 +488,4 @@ int main()
 	}
 
 	system("pause");
-
-	return 0;
 }
