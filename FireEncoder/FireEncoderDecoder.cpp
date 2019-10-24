@@ -200,25 +200,6 @@ private:
 	// полином для кодирования
 	VecPoly gxf;
 
-	static void get_padded_bit_chunk(ifstream& file, vector<bool>& data, size_t byte_offset, size_t byte_chunk_size)
-	{
-		data.clear();
-		data.reserve(byte_chunk_size * 8);
-		file.clear();
-		file.seekg(byte_offset);
-		for (size_t i = 0; i < byte_chunk_size; i++)
-		{
-			uint8_t byte_data = 0;
-			file.get((char&) byte_data);
-
-			for (int j = 7; j >= 0; j--)
-			{
-				bool bit = (byte_data >> j) & 1;
-				data.push_back(bit);
-			}
-		}
-	}
-
 	static long filesize(const string& filename)
 	{
 		struct stat stat_buf;
@@ -326,47 +307,56 @@ public:
 #endif
 		for (int64_t chunk_num = 0; chunk_num < in_total_chunks; chunk_num++)
 		{
-			vector<bool> in_chunk;
+			size_t in_byte_offset = chunk_num * (in_chunk_size / 8);
+			vector<uint8_t> in_buf(in_chunk_size / 8);
 
-#pragma omp critical(EncReadFromFile)
+			#pragma omp critical(FileIO)
 			{
-				get_padded_bit_chunk(file, in_chunk, chunk_num * (in_chunk_size / 8), in_chunk_size / 8);
+				file.clear();
+				file.seekg(in_byte_offset);
+				file.read((char*)in_buf.data(), in_buf.size());
 			}
 
-			vector<vector<bool>> out_blocks;
-			size_t blocks = in_chunk.size() / in_block_size;
-			for (size_t i = 0; i < blocks; i++)
+			vector<bool> in_chunk;
+			in_chunk.reserve(in_chunk_size);
+			for (uint8_t byte_data : in_buf)
+			{
+				for (int j = 7; j >= 0; j--)
+					in_chunk.push_back((byte_data >> j) & 1);
+			}
+
+			vector<uint8_t> out_buf;
+			int bits_wrote = 0;
+			uint8_t out_byte = 0;
+			int blocks = in_chunk.size() / in_block_size;
+			for (int i = 0; i < blocks; i++)
 			{
 				VecPoly info(in_block_size);
 				size_t in_bit_offset = i * in_block_size;
 				copy(in_chunk.begin() + in_bit_offset, in_chunk.begin() + in_bit_offset + in_block_size, info.vec.begin());
 				encode_block(info);
-				out_blocks.push_back(move(info.vec));
+
+				for (bool b : info.vec)
+				{
+					out_byte |= b ? 1 : 0;
+					bits_wrote++;
+
+					if (bits_wrote == 8)
+					{
+						out_buf.push_back(out_byte);
+						out_byte = 0;
+						bits_wrote = 0;
+					}
+
+					out_byte <<= 1;
+				}
 			}
 
-#pragma omp critical(EncWriteToFile)
+			size_t out_byte_offset = chunk_num * (out_chunk_size / 8) + sizeof(total_bytes);
+			#pragma omp critical(FileIO)
 			{
-				size_t out_byte_offset = chunk_num * (out_chunk_size / 8) + sizeof(total_bytes);
 				output_file.seekp(out_byte_offset);
-				int bits_wrote = 0;
-				uint8_t out_byte = 0;
-				for (const vector<bool>& out_block : out_blocks)
-				{
-					for (bool b : out_block)
-					{
-						out_byte |= b ? 1 : 0;
-						bits_wrote++;
-
-						if (bits_wrote == 8)
-						{
-							output_file.put(out_byte);
-							out_byte = 0;
-							bits_wrote = 0;
-						}
-
-						out_byte <<= 1;
-					}
-				}
+				output_file.write((char*) out_buf.data(), out_buf.size());
 			}
 		}
 	}
@@ -391,50 +381,58 @@ public:
 #endif
 		for (int64_t chunk_num = 0; chunk_num < in_total_chunks; chunk_num++)
 		{
-			vector<bool> in_chunk;
+			size_t in_byte_offset = chunk_num * (in_chunk_size / 8) + sizeof(out_total_bytes);
+			vector<uint8_t> in_buf(in_chunk_size / 8);
 
-#pragma omp critical(DecReadFromFile)
+			#pragma omp critical(FileIO)
 			{
-				size_t in_byte_offset = chunk_num * (in_chunk_size / 8) + sizeof(out_total_bytes);
-				get_padded_bit_chunk(file, in_chunk, in_byte_offset, in_chunk_size / 8);
+				file.clear();
+				file.seekg(in_byte_offset);
+				file.read((char*) in_buf.data(), in_buf.size());
 			}
 
-			vector<vector<bool>> out_blocks;
-			size_t blocks = in_chunk.size() / in_block_size;
-			for (size_t i = 0; i < blocks; i++)
+			vector<bool> in_chunk;
+			in_chunk.reserve(in_chunk_size);
+			for (uint8_t byte_data: in_buf)
+			{
+				for (int j = 7; j >= 0; j--)
+					in_chunk.push_back((byte_data >> j) & 1);
+			}
+
+			size_t out_byte_offset = chunk_num * (out_chunk_size / 8);
+			vector<uint8_t> out_buf;
+			int bits_wrote = 0;
+			uint8_t out_byte = 0;
+			int blocks = in_chunk.size() / in_block_size;
+			for (int i = 0; i < blocks; i++)
 			{
 				VecPoly info(in_block_size);
 				size_t in_bit_offset = i * in_block_size;
 				copy(in_chunk.begin() + in_bit_offset, in_chunk.begin() + in_bit_offset + in_block_size, info.vec.begin());
 				decode_block(info);
-				out_blocks.push_back(move(info.vec));
+
+				for (bool b : info.vec)
+				{
+					out_byte |= b ? 1 : 0;
+					bits_wrote++;
+
+					if (bits_wrote == 8 && out_byte_offset < out_total_bytes)
+					{
+						out_buf.push_back(out_byte);
+						out_byte = 0;
+						bits_wrote = 0;
+						out_byte_offset++;
+					}
+
+					out_byte <<= 1;
+				}
 			}
 
-#pragma omp critical(DecWriteToFile)
+			out_byte_offset = chunk_num * (out_chunk_size / 8);
+			#pragma omp critical(FileIO)
 			{
-				size_t out_byte_offset = chunk_num * (out_chunk_size / 8);
 				output_file.seekp(out_byte_offset);
-				int bits_wrote = 0;
-				uint8_t out_byte = 0;
-				for (const vector<bool>& out_block : out_blocks)
-				{
-					for (bool b : out_block)
-					{
-						out_byte |= b ? 1 : 0;
-						bits_wrote++;
-
-						if (bits_wrote == 8)
-						{
-							if(out_byte_offset < out_total_bytes)
-								output_file.put(out_byte);
-							out_byte = 0;
-							bits_wrote = 0;
-							out_byte_offset++;
-						}
-
-						out_byte <<= 1;
-					}
-				}
+				output_file.write((char*) out_buf.data(), out_buf.size());
 			}
 		}
 	}
@@ -449,7 +447,7 @@ const map<int, vector<vector<bool>>> FireEncDec::gxes = {
 	{7, {{1, 1, 1, 0, 0, 1, 1, 1}, {1, 0, 0, 0, 0, 0, 1, 1}, {1, 0, 0, 1, 1, 1, 0, 1}}}
 };
 
-int main()
+int main(int argc, char** argv)
 {
 	string filename;
 	int P;
