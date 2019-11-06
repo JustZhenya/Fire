@@ -4,6 +4,8 @@
 #include <vector>
 #include <algorithm>
 #include <map>
+#include <mpi.h>
+#include <thread>
 
 using namespace std;
 
@@ -184,7 +186,7 @@ public:
 
 class FireEncDec
 {
-private:
+public:
 	// неприводимые полиномы g(x)
 	static const map<int, vector<vector<bool>>> gxes;
 
@@ -199,6 +201,42 @@ private:
 
 	// полином для кодирования
 	VecPoly gxf;
+
+public:
+	// P - длина исправляемого пакета
+	FireEncDec(int P) : n(), r(), payload_len(), gxf_msb(), gx(0), xc(0), gxf(0)
+	{
+		int t = P; // старшая степень t не меньше длины исправляемого пакета P
+		int c = 2 * P; // Старшая степень с второго полинома должна равняться или превышать удвоенную длину предполагаемого пакета ошибок Р
+		int e = pow(2, t) - 1; // При этом с не должно делиться нацело на число е, где е = 2^t - 1
+		while (c % e == 0)
+			c++;
+
+		gx = gxes.at(t)[0];
+
+		xc.vec.resize(c + 1, false);
+		xc.vec[0] = 1;
+		xc.vec[c] = 1;
+
+		gxf = gx * xc; // образующий полином кода Файра G(X)Ф определяется произведением двух примитивных полиномов: G(X)Ф = G(X)(Xс+1)
+		gxf_msb = gxf.vec.size() - 1; // старшая степень полинома g(x)f
+
+		n = e * c; // блоковая длина кода Файра будет являться произведением чисел e и с: n = е*с
+		r = t + c; // длина проверочной группы r в кодовой комбинации будет являться суммой старших степеней обоих образующих полиномов: r = t+c
+		payload_len = n - r; // длина полезной информации
+
+		/*cout << "P = " << P << endl;
+		cout << "t = " << t << endl;
+		cout << "c = " << c << endl;
+		cout << "e = " << e << endl;
+		cout << "gx = " << gx.to_string() << endl;
+		cout << "xc = " << xc.to_string() << endl;
+		cout << "gxf = " << gxf.to_string() << endl;
+		cout << "gxf_msb = " << gxf_msb << endl;
+		cout << "n = " << n << endl;
+		cout << "r = " << r << endl;
+		cout << "n-r = " << payload_len << endl;*/
+	}
 
 	static long filesize(const string& filename)
 	{
@@ -250,192 +288,6 @@ private:
 
 		cx.vec.erase(cx.vec.end() - r, cx.vec.end()); // отбросить проверочный код и поделить на x^6 (на самом деле x^4)
 	}
-
-public:
-	// P - длина исправляемого пакета
-	FireEncDec(int P) : n(), r(), payload_len(), gxf_msb(), gx(0), xc(0), gxf(0)
-	{
-		int t = P; // старшая степень t не меньше длины исправляемого пакета P
-		int c = 2 * P; // Старшая степень с второго полинома должна равняться или превышать удвоенную длину предполагаемого пакета ошибок Р
-		int e = pow(2, t) - 1; // При этом с не должно делиться нацело на число е, где е = 2^t - 1
-		while (c % e == 0)
-			c++;
-
-		gx = gxes.at(t)[0];
-
-		xc.vec.resize(c + 1, false);
-		xc.vec[0] = 1;
-		xc.vec[c] = 1;
-
-		gxf = gx * xc; // образующий полином кода Файра G(X)Ф определяется произведением двух примитивных полиномов: G(X)Ф = G(X)(Xс+1)
-		gxf_msb = gxf.vec.size() - 1; // старшая степень полинома g(x)f
-
-		n = e * c; // блоковая длина кода Файра будет являться произведением чисел e и с: n = е*с
-		r = t + c; // длина проверочной группы r в кодовой комбинации будет являться суммой старших степеней обоих образующих полиномов: r = t+c
-		payload_len = n - r; // длина полезной информации
-
-		cout << "P = " << P << endl;
-		cout << "t = " << t << endl;
-		cout << "c = " << c << endl;
-		cout << "e = " << e << endl;
-		cout << "gx = " << gx.to_string() << endl;
-		cout << "xc = " << xc.to_string() << endl;
-		cout << "gxf = " << gxf.to_string() << endl;
-		cout << "gxf_msb = " << gxf_msb << endl;
-		cout << "n = " << n << endl;
-		cout << "r = " << r << endl;
-		cout << "n-r = " << payload_len << endl;
-	}
-
-	void encode(const string& filename, const string& out_filename)
-	{
-		ifstream file(filename, ios::binary);
-		size_t total_bytes = filesize(filename);
-
-		ofstream output_file(out_filename, ios::binary);
-		output_file.write((char*)&total_bytes, sizeof(total_bytes)); // fixme endianess
-
-		size_t in_block_size = payload_len; // in bits
-		size_t out_block_size = n; // in bits
-		size_t in_chunk_size = NOK(16, NOK(in_block_size, out_block_size)); // in bits
-		size_t blocks_per_chunk = in_chunk_size / in_block_size;
-		size_t out_chunk_size = out_block_size * blocks_per_chunk; // in bits
-		size_t in_total_chunks = ceil(total_bytes * 8.0 / in_chunk_size);
-
-#ifndef _DEBUG
-#pragma omp parallel for
-#endif
-		for (int64_t chunk_num = 0; chunk_num < in_total_chunks; chunk_num++)
-		{
-			size_t in_byte_offset = chunk_num * (in_chunk_size / 8);
-			vector<uint8_t> in_buf(in_chunk_size / 8);
-
-			#pragma omp critical(FileIO)
-			{
-				file.clear();
-				file.seekg(in_byte_offset);
-				file.read((char*)in_buf.data(), in_buf.size());
-			}
-
-			vector<bool> in_chunk;
-			in_chunk.reserve(in_chunk_size);
-			for (uint8_t byte_data : in_buf)
-			{
-				for (int j = 7; j >= 0; j--)
-					in_chunk.push_back((byte_data >> j) & 1);
-			}
-
-			vector<uint8_t> out_buf;
-			int bits_wrote = 0;
-			uint8_t out_byte = 0;
-			int blocks = in_chunk.size() / in_block_size;
-			for (int i = 0; i < blocks; i++)
-			{
-				VecPoly info(in_block_size);
-				size_t in_bit_offset = i * in_block_size;
-				copy(in_chunk.begin() + in_bit_offset, in_chunk.begin() + in_bit_offset + in_block_size, info.vec.begin());
-				encode_block(info);
-
-				for (bool b : info.vec)
-				{
-					out_byte |= b ? 1 : 0;
-					bits_wrote++;
-
-					if (bits_wrote == 8)
-					{
-						out_buf.push_back(out_byte);
-						out_byte = 0;
-						bits_wrote = 0;
-					}
-
-					out_byte <<= 1;
-				}
-			}
-
-			size_t out_byte_offset = chunk_num * (out_chunk_size / 8) + sizeof(total_bytes);
-			#pragma omp critical(FileIO)
-			{
-				output_file.seekp(out_byte_offset);
-				output_file.write((char*) out_buf.data(), out_buf.size());
-			}
-		}
-	}
-
-	void decode(const string& filename, const string& out_filename)
-	{
-		ifstream file(filename, ios::binary);
-		size_t out_total_bytes, total_bytes = filesize(filename) - sizeof(out_total_bytes);
-		file.read((char*)&out_total_bytes, sizeof(out_total_bytes)); // fixme endianess
-
-		ofstream output_file(out_filename, ios::binary);
-
-		size_t in_block_size = n; // in bits
-		size_t out_block_size = payload_len; // in bits
-		size_t in_chunk_size = NOK(16, NOK(in_block_size, out_block_size)); // in bits
-		size_t blocks_per_chunk = in_chunk_size / in_block_size;
-		size_t out_chunk_size = out_block_size * blocks_per_chunk; // in bits
-		size_t in_total_chunks = ceil(total_bytes * 8.0 / in_chunk_size);
-
-#ifndef _DEBUG
-#pragma omp parallel for
-#endif
-		for (int64_t chunk_num = 0; chunk_num < in_total_chunks; chunk_num++)
-		{
-			size_t in_byte_offset = chunk_num * (in_chunk_size / 8) + sizeof(out_total_bytes);
-			vector<uint8_t> in_buf(in_chunk_size / 8);
-
-			#pragma omp critical(FileIO)
-			{
-				file.clear();
-				file.seekg(in_byte_offset);
-				file.read((char*) in_buf.data(), in_buf.size());
-			}
-
-			vector<bool> in_chunk;
-			in_chunk.reserve(in_chunk_size);
-			for (uint8_t byte_data: in_buf)
-			{
-				for (int j = 7; j >= 0; j--)
-					in_chunk.push_back((byte_data >> j) & 1);
-			}
-
-			size_t out_byte_offset = chunk_num * (out_chunk_size / 8);
-			vector<uint8_t> out_buf;
-			int bits_wrote = 0;
-			uint8_t out_byte = 0;
-			int blocks = in_chunk.size() / in_block_size;
-			for (int i = 0; i < blocks; i++)
-			{
-				VecPoly info(in_block_size);
-				size_t in_bit_offset = i * in_block_size;
-				copy(in_chunk.begin() + in_bit_offset, in_chunk.begin() + in_bit_offset + in_block_size, info.vec.begin());
-				decode_block(info);
-
-				for (bool b : info.vec)
-				{
-					out_byte |= b ? 1 : 0;
-					bits_wrote++;
-
-					if (bits_wrote == 8 && out_byte_offset < out_total_bytes)
-					{
-						out_buf.push_back(out_byte);
-						out_byte = 0;
-						bits_wrote = 0;
-						out_byte_offset++;
-					}
-
-					out_byte <<= 1;
-				}
-			}
-
-			out_byte_offset = chunk_num * (out_chunk_size / 8);
-			#pragma omp critical(FileIO)
-			{
-				output_file.seekp(out_byte_offset);
-				output_file.write((char*) out_buf.data(), out_buf.size());
-			}
-		}
-	}
 };
 
 const map<int, vector<vector<bool>>> FireEncDec::gxes = {
@@ -447,43 +299,225 @@ const map<int, vector<vector<bool>>> FireEncDec::gxes = {
 	{7, {{1, 1, 1, 0, 0, 1, 1, 1}, {1, 0, 0, 0, 0, 0, 1, 1}, {1, 0, 0, 1, 1, 1, 0, 1}}}
 };
 
+class MPIController
+{
+private:
+	const FireEncDec& fire;
+	string filename_in;
+	string filename_out;
+	size_t payload_total_bytes;
+	size_t out_bytes;
+	int mode;
+
+public:
+	MPIController(const FireEncDec& _fire, const string& _filename_in, const string& _filename_out, size_t _payload_total_bytes, int _mode) :
+		fire(_fire),
+		filename_in(_filename_in),
+		filename_out(_filename_out),
+		payload_total_bytes(_payload_total_bytes),
+		out_bytes(0),
+		mode(_mode)
+	{
+		 
+	}
+
+	void send_data()
+	{
+		ifstream in_file(filename_in, ios::binary);
+
+		if (mode == 1)
+			in_file.read((char*)&out_bytes, sizeof(out_bytes));
+
+		size_t in_block_size = mode == 0 ? fire.payload_len : fire.n; // in bits
+		size_t out_block_size = mode == 0 ? fire.n : fire.payload_len; // in bits
+		size_t in_chunk_size = NOK(16, NOK(in_block_size, out_block_size)); // in bits
+		size_t blocks_per_chunk = in_chunk_size / in_block_size;
+		size_t out_chunk_size = out_block_size * blocks_per_chunk; // in bits
+		size_t total_chunks = ceil(payload_total_bytes * 8.0 / in_chunk_size);
+
+		int world_size;
+		MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+		size_t chunks_per_thread = ceil((double) total_chunks / (world_size - 1));
+
+		cout << in_block_size << " " << out_block_size << " " << in_chunk_size << " " << chunks_per_thread << endl;
+
+		size_t chunk_offset = 0;
+		for (int thread_id = 1; thread_id < world_size; thread_id++)
+		{
+			size_t this_thread_chunks = min(chunks_per_thread, total_chunks - chunk_offset);
+
+			vector<uint8_t> buf((in_chunk_size / 8) * this_thread_chunks);
+			in_file.read((char*) buf.data(), buf.size());
+
+			MPI_Send(&this_thread_chunks, 1, MPI_LONG_LONG, thread_id, 0, MPI_COMM_WORLD);
+			MPI_Send(&chunk_offset, 1, MPI_LONG_LONG, thread_id, 0, MPI_COMM_WORLD);
+			MPI_Send(buf.data(), buf.size(), MPI_UNSIGNED_CHAR, thread_id, 0, MPI_COMM_WORLD);
+
+			chunk_offset += this_thread_chunks;
+		}
+	}
+
+	void recv_data()
+	{
+		ofstream out_file(filename_out, ios::binary);
+
+		if (mode == 0)
+			out_file.write((char*)&payload_total_bytes, sizeof(payload_total_bytes));
+
+		size_t in_block_size = mode == 0 ? fire.payload_len : fire.n; // in bits
+		size_t out_block_size = mode == 0 ? fire.n : fire.payload_len; // in bits
+		size_t in_chunk_size = NOK(16, NOK(in_block_size, out_block_size)); // in bits
+		size_t blocks_per_chunk = in_chunk_size / in_block_size;
+		size_t out_chunk_size = out_block_size * blocks_per_chunk; // in bits
+
+		int world_size;
+		MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+		size_t bytes_written = 0;
+		for (int thread_id = 1; thread_id < world_size; thread_id++)
+		{
+			size_t this_thread_chunks, chunk_offset;
+			MPI_Recv(&this_thread_chunks, 1, MPI_LONG_LONG, thread_id, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			MPI_Recv(&chunk_offset, 1, MPI_LONG_LONG, thread_id, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+			vector<char> buf((out_chunk_size / 8) * this_thread_chunks);
+			MPI_Recv(buf.data(), buf.size(), MPI_UNSIGNED_CHAR, thread_id, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+			size_t bytes_to_write = mode == 0 ? buf.size() : min(buf.size(), out_bytes - bytes_written);
+			out_file.write(buf.data(), bytes_to_write);
+			bytes_written += bytes_to_write;
+		}
+	}
+
+	void run()
+	{
+		thread send_thr(&MPIController::send_data, this); // send chunks to all threads
+		thread recv_thr(&MPIController::recv_data, this); // recv chunks from threads
+		send_thr.join();
+		recv_thr.join();
+	}
+};
+
+class MPIWorker
+{
+private:
+	const FireEncDec& fire;
+	int mode;
+
+public:
+	MPIWorker(const FireEncDec& _fire, int _mode) :
+		fire(_fire),
+		mode(_mode)
+	{
+
+	}
+
+	void run()
+	{
+		size_t in_block_size = mode == 0 ? fire.payload_len : fire.n; // in bits
+		size_t out_block_size = mode == 0 ? fire.n : fire.payload_len; // in bits
+		size_t in_chunk_size = NOK(16, NOK(in_block_size, out_block_size)); // in bits
+
+		size_t this_thread_chunks, chunk_offset;
+		MPI_Recv(&this_thread_chunks, 1, MPI_LONG_LONG, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		MPI_Recv(&chunk_offset, 1, MPI_LONG_LONG, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+		vector<uint8_t> buf((in_chunk_size / 8) * this_thread_chunks);
+		MPI_Recv(buf.data(), buf.size(), MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+		vector<bool> bitchunk;
+		bitchunk.reserve(in_chunk_size);
+		for (uint8_t byte_data : buf)
+		{
+			for (int j = 7; j >= 0; j--)
+				bitchunk.push_back((byte_data >> j) & 1);
+		}
+
+		vector<uint8_t> out_buf;
+		int bits_wrote = 0;
+		uint8_t out_byte = 0;
+		size_t blocks = bitchunk.size() / in_block_size;
+		for (size_t i = 0; i < blocks; i++)
+		{
+			VecPoly info(in_block_size);
+			size_t in_bit_offset = i * in_block_size;
+			copy(bitchunk.begin() + in_bit_offset, bitchunk.begin() + in_bit_offset + in_block_size, info.vec.begin());
+
+			if (mode == 0)
+				fire.encode_block(info);
+			else
+				fire.decode_block(info);
+
+			for (bool b : info.vec)
+			{
+				out_byte |= b ? 1 : 0;
+				bits_wrote++;
+
+				if (bits_wrote == 8)
+				{
+					out_buf.push_back(out_byte);
+					out_byte = 0;
+					bits_wrote = 0;
+				}
+
+				out_byte <<= 1;
+			}
+		}
+
+		MPI_Send(&this_thread_chunks, 1, MPI_LONG_LONG, 0, 0, MPI_COMM_WORLD);
+		MPI_Send(&chunk_offset, 1, MPI_LONG_LONG, 0, 0, MPI_COMM_WORLD);
+		MPI_Send(out_buf.data(), out_buf.size(), MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD);
+	}
+};
+
 int main(int argc, char** argv)
 {
-	string filename;
-	int P;
-
-	cout << "Filename: " << flush;
-	cin >> filename;
-
-	cout << "Expected error rate: " << flush;
-	cin >> P;
-
-	if (P < 2 || P > 7)
+	if (MPI_Init(&argc, &argv))
 	{
-		cout << "EER can be from 2 to 7" << endl;
+		cerr << "Failed to init MPI" << endl;
+		return 1;
+	}
+
+	string filename = argv[1];
+	int P = stoi(argv[2]);
+	int mode = stoi(argv[3]);
+
+	if (mode == 0)
+	{
+		cout << "Encoding..." << flush;
+	}
+	else if (mode == 1)
+	{
+		cout << "Decoding..." << flush;
+	}
+	else
+	{
+		cerr << "Invalid Mode" << endl;
+		MPI_Finalize();
 		return 1;
 	}
 
 	FireEncDec fire(P);
 
-	char mode;
-	cout << "Mode (a - all, d - decode, e - encode): " << flush;
-	cin >> mode;
-
-	if (mode == 'a' || mode == 'e')
+	int rank;
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	if (rank == 0)
 	{
-		cout << "Encoding..." << flush;
-		fire.encode(filename, filename + ".enc");
-		filename += ".enc";
-		cout << " done!" << endl;
+		size_t bytes = FireEncDec::filesize(filename);
+		if(mode == 1)
+			bytes -= sizeof(size_t);
+		string out_filename = filename + (mode == 0 ? ".enc" : ".dec");
+		MPIController mpic(fire, filename, out_filename, bytes, mode);
+		mpic.run();
+	}
+	else
+	{
+		MPIWorker mpiw(fire, mode);
+		mpiw.run();
 	}
 
-	if (mode == 'a' || mode == 'd')
-	{
-		cout << "Decoding..." << flush;
-		fire.decode(filename, filename + ".dec");
-		cout << " done!" << endl;
-	}
+	cout << rank << " done" << endl;
 
-	system("pause");
+	MPI_Finalize();
 }
