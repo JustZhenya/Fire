@@ -434,7 +434,9 @@ public:
 				bitchunk.push_back((byte_data >> j) & 1);
 		}
 
-		vector<uint8_t> out_buf;
+		buf.clear();
+		//buf.reserve();
+
 		int bits_wrote = 0;
 		uint8_t out_byte = 0;
 		size_t blocks = bitchunk.size() / in_block_size;
@@ -456,7 +458,7 @@ public:
 
 				if (bits_wrote == 8)
 				{
-					out_buf.push_back(out_byte);
+					buf.push_back(out_byte);
 					out_byte = 0;
 					bits_wrote = 0;
 				}
@@ -467,7 +469,7 @@ public:
 
 		MPI_Send(&this_thread_chunks, 1, MPI_LONG_LONG, 0, 0, MPI_COMM_WORLD);
 		MPI_Send(&chunk_offset, 1, MPI_LONG_LONG, 0, 0, MPI_COMM_WORLD);
-		MPI_Send(out_buf.data(), out_buf.size(), MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD);
+		MPI_Send(buf.data(), buf.size(), MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD);
 	}
 };
 
