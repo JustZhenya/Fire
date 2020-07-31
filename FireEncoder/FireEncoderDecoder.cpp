@@ -7,6 +7,8 @@
 #include <mpi.h>
 #include <thread>
 
+#include <sys/stat.h>
+
 using namespace std;
 
 // Наибольший общий делитель
@@ -350,9 +352,14 @@ public:
 			vector<uint8_t> buf((in_chunk_size / 8) * this_thread_chunks);
 			in_file.read((char*) buf.data(), buf.size());
 
-			MPI_Send(&this_thread_chunks, 1, MPI_LONG_LONG, thread_id, 0, MPI_COMM_WORLD);
-			MPI_Send(&chunk_offset, 1, MPI_LONG_LONG, thread_id, 0, MPI_COMM_WORLD);
-			MPI_Send(buf.data(), buf.size(), MPI_UNSIGNED_CHAR, thread_id, 0, MPI_COMM_WORLD);
+			MPI_Ssend(&this_thread_chunks, 1, MPI_LONG_LONG, thread_id, 0, MPI_COMM_WORLD);
+			MPI_Ssend(&chunk_offset, 1, MPI_LONG_LONG, thread_id, 0, MPI_COMM_WORLD);
+			MPI_Ssend(buf.data(), buf.size(), MPI_UNSIGNED_CHAR, thread_id, 0, MPI_COMM_WORLD);
+
+			cout << "waiting for " << thread_id << " to recieve" << endl;
+
+			char flag;
+			//MPI_Recv(&flag, 1, MPI_UNSIGNED_CHAR, thread_id, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
 			chunk_offset += this_thread_chunks;
 		}
@@ -377,6 +384,9 @@ public:
 		size_t bytes_written = 0;
 		for (int thread_id = 1; thread_id < world_size; thread_id++)
 		{
+			//char flag = 1;
+			//MPI_Ssend(&flag, 1, MPI_UNSIGNED_CHAR, thread_id, 0, MPI_COMM_WORLD);
+
 			size_t this_thread_chunks, chunk_offset;
 			MPI_Recv(&this_thread_chunks, 1, MPI_LONG_LONG, thread_id, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 			MPI_Recv(&chunk_offset, 1, MPI_LONG_LONG, thread_id, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -426,6 +436,9 @@ public:
 		vector<uint8_t> buf((in_chunk_size / 8) * this_thread_chunks);
 		MPI_Recv(buf.data(), buf.size(), MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
+		char flag = 1;
+		//MPI_Ssend(&flag, 1, MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD);
+
 		vector<bool> bitchunk;
 		bitchunk.reserve(in_chunk_size);
 		for (uint8_t byte_data : buf)
@@ -467,9 +480,15 @@ public:
 			}
 		}
 
-		MPI_Send(&this_thread_chunks, 1, MPI_LONG_LONG, 0, 0, MPI_COMM_WORLD);
-		MPI_Send(&chunk_offset, 1, MPI_LONG_LONG, 0, 0, MPI_COMM_WORLD);
-		MPI_Send(buf.data(), buf.size(), MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD);
+		cout << "handle done" << endl;
+		
+		//MPI_Recv(&flag, 1, MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+		cout << "sending..." << endl;
+
+		MPI_Ssend(&this_thread_chunks, 1, MPI_LONG_LONG, 0, 0, MPI_COMM_WORLD);
+		MPI_Ssend(&chunk_offset, 1, MPI_LONG_LONG, 0, 0, MPI_COMM_WORLD);
+		MPI_Ssend(buf.data(), buf.size(), MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD);
 	}
 };
 
@@ -502,6 +521,7 @@ int main(int argc, char** argv)
 
 	FireEncDec fire(P);
 
+	double t1, t2;
 	int rank;
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	if (rank == 0)
@@ -511,7 +531,10 @@ int main(int argc, char** argv)
 			bytes -= sizeof(size_t);
 		string out_filename = filename + (mode == 0 ? ".enc" : ".dec");
 		MPIController mpic(fire, filename, out_filename, bytes, mode);
+		t1 = MPI_Wtime();
 		mpic.run();
+		t2 = MPI_Wtime();
+		cout << "time: " << (t2 - t1) << " sec" << endl;
 	}
 	else
 	{
